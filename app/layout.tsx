@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import { ThemeProvider } from "@/components/theme-provider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -12,18 +13,23 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <div className="flex h-screen bg-gray-100">
-          <Sidebar />
-          <main className="flex-1 overflow-auto">
-            {children}
-          </main>
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      {/* Tambahkan class "dark" agar default-nya dark mode */}
+      <body className={`dark ${inter.className}`}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark" // ✅ set default ke dark
+          enableSystem={false} // ✅ nonaktifkan mode system biar fix dark
+        >
+          <div className="flex h-screen bg-background text-foreground">
+            <Sidebar />
+            <main className="flex-1 overflow-auto">{children}</main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );
