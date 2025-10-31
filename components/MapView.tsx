@@ -1,137 +1,136 @@
 "use client";
-
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-interface MapViewProps {
-  geojson?: any;
+type MapViewProps = {
+  geojson: GeoJSON.FeatureCollection;
   center?: [number, number];
   zoom?: number;
-}
+};
 
 export default function MapView({
   geojson,
-  center = [0, 0],
-  zoom = 2,
+  center = [101.5, 0.5],
+  zoom = 8,
 }: MapViewProps) {
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<maplibregl.Map | null>(null);
+  const mapContainer = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
 
-  // 1️⃣ Initialize map only once
   useEffect(() => {
-    if (map.current || !mapContainer.current) return;
+    // Jika belum ada container, jangan lanjut
+    if (!mapContainer.current) return;
 
-    map.current = new maplibregl.Map({
+    // ✅ Bersihkan map sebelumnya hanya kalau sudah ada instance valid
+    if (mapRef.current && mapRef.current.remove) {
+      try {
+        mapRef.current.remove();
+      } catch (err) {
+        console.warn("Map cleanup skipped:", err);
+      }
+      mapRef.current = null;
+    }
+
+    // Buat instance baru MapLibre
+    const map = new maplibregl.Map({
       container: mapContainer.current,
       style: "https://demotiles.maplibre.org/style.json",
       center,
       zoom,
     });
+    mapRef.current = map;
 
-    map.current.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.on("load", () => {
+      if (!geojson || !geojson.features?.length) {
+        console.warn("GeoJSON kosong");
+        return;
+      }
 
-    return () => {
-      map.current?.remove();
-    };
-  }, [center, zoom]);
+      map.addSource("challenge-data", {
+        type: "geojson",
+        data: geojson,
+      });
 
-  // 2️⃣ Update GeoJSON dynamically
-  useEffect(() => {
-    if (!map.current || !geojson) return;
+      const geomType = geojson.features[0]?.geometry?.type;
+      console.log("Detected geometry:", geomType);
 
-    const mapInstance = map.current;
-
-    mapInstance.once("load", () => {
-      if (!mapInstance.getSource("geojson-data")) {
-        mapInstance.addSource("geojson-data", {
-          type: "geojson",
-          data: geojson,
+      // Tambahkan layer sesuai tipe geometry
+      if (geomType === "Point" || geomType === "MultiPoint") {
+        map.addLayer({
+          id: "points-layer",
+          type: "circle",
+          source: "challenge-data",
+          paint: {
+            "circle-radius": 6,
+            "circle-color": "#FF3B3B",
+            "circle-stroke-color": "#fff",
+            "circle-stroke-width": 2,
+          },
         });
-      } else {
-        (
-          mapInstance.getSource("geojson-data") as maplibregl.GeoJSONSource
-        ).setData(geojson);
+      } else if (geomType === "LineString" || geomType === "MultiLineString") {
+        map.addLayer({
+          id: "lines-layer",
+          type: "line",
+          source: "challenge-data",
+          paint: {
+            "line-color": "#1D4ED8",
+            "line-width": 3,
+          },
+        });
+      } else if (geomType === "Polygon" || geomType === "MultiPolygon") {
+        map.addLayer({
+          id: "fill-layer",
+          type: "fill",
+          source: "challenge-data",
+          paint: {
+            "fill-color": "#3B82F6",
+            "fill-opacity": 0.4,
+          },
+        });
+        map.addLayer({
+          id: "outline-layer",
+          type: "line",
+          source: "challenge-data",
+          paint: {
+            "line-color": "#1D4ED8",
+            "line-width": 2,
+          },
+        });
       }
 
-      const geometryType = geojson.features?.[0]?.geometry?.type;
-
-      const hasLayer = (id: string) => mapInstance.getLayer(id);
-
-      if (geometryType === "Point" || geometryType === "MultiPoint") {
-        if (!hasLayer("points")) {
-          mapInstance.addLayer({
-            id: "points",
-            type: "circle",
-            source: "geojson-data",
-            paint: {
-              "circle-radius": 6,
-              "circle-color": "#3b82f6",
-              "circle-stroke-width": 2,
-              "circle-stroke-color": "#ffffff",
-            },
-          });
-        }
-      } else if (
-        geometryType === "LineString" ||
-        geometryType === "MultiLineString"
-      ) {
-        if (!hasLayer("lines")) {
-          mapInstance.addLayer({
-            id: "lines",
-            type: "line",
-            source: "geojson-data",
-            paint: {
-              "line-color": "#3b82f6",
-              "line-width": 3,
-            },
-          });
-        }
-      } else if (
-        geometryType === "Polygon" ||
-        geometryType === "MultiPolygon"
-      ) {
-        if (!hasLayer("polygons-fill")) {
-          mapInstance.addLayer({
-            id: "polygons-fill",
-            type: "fill",
-            source: "geojson-data",
-            paint: {
-              "fill-color": "#3b82f6",
-              "fill-opacity": 0.5,
-            },
-          });
-        }
-        if (!hasLayer("polygons-outline")) {
-          mapInstance.addLayer({
-            id: "polygons-outline",
-            type: "line",
-            source: "geojson-data",
-            paint: {
-              "line-color": "#1e40af",
-              "line-width": 2,
-            },
-          });
-        }
-      }
-
-      // Fit bounds
+      // Auto fit ke semua fitur
       const bounds = new maplibregl.LngLatBounds();
-      geojson.features.forEach((f: any) => {
-        if (f.geometry.type === "Point") bounds.extend(f.geometry.coordinates);
-        else if (f.geometry.coordinates) {
-          const coords = f.geometry.coordinates
-            .flat(Infinity)
-            .filter((c: any) => Array.isArray(c));
-          coords.forEach((c: any) => bounds.extend(c));
+      geojson.features.forEach((f) => {
+        if (f.geometry.type === "Point") {
+          bounds.extend(f.geometry.coordinates as [number, number]);
+        } else if (f.geometry.type === "LineString") {
+          (f.geometry.coordinates as [number, number][]).forEach((c) =>
+            bounds.extend(c)
+          );
+        } else if (f.geometry.type === "Polygon") {
+          (f.geometry.coordinates[0] as [number, number][]).forEach((c) =>
+            bounds.extend(c)
+          );
         }
       });
 
       if (!bounds.isEmpty()) {
-        mapInstance.fitBounds(bounds, { padding: 50 });
+        map.fitBounds(bounds, { padding: 50, duration: 500 });
       }
     });
-  }, [geojson]);
 
-  return <div ref={mapContainer} className="w-full h-full rounded-xl shadow" />;
+    // ✅ Cleanup aman
+    return () => {
+      if (mapRef.current && mapRef.current.remove) {
+        try {
+          mapRef.current.remove();
+        } catch {
+          // ignore
+        }
+      }
+      mapRef.current = null;
+    };
+  }, [geojson, center, zoom]);
+
+  return <div ref={mapContainer} className="w-full h-full" />;
 }
